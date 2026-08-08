@@ -1,0 +1,42 @@
+name: Compilar APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Descargar proyecto
+        uses: actions/checkout@v4
+
+      - name: Instalar Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Instalar Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10'
+
+      - name: Descomprimir proyecto
+        run: |
+          unzip -o GestorFinanceiroPessoal-V2.5-fonte.zip
+          echo "Contenido:"
+          find . -maxdepth 3 -type f | sort
+
+      - name: Compilar APK
+        working-directory: GestorFinanceiroPessoal
+        run: gradle assembleDebug --no-daemon
+
+      - name: Guardar APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: GestorFinanceiroPessoal-APK
+          path: GestorFinanceiroPessoal/app/build/outputs/apk/debug/app-debug.apk
