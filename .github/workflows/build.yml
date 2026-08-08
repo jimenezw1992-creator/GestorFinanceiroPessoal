@@ -15,7 +15,7 @@ jobs:
     steps:
 
       # ==========================================
-      # 1. PREPARAR UBUNTU
+      # 1. DESCARGAR REPOSITORIO
       # ==========================================
       - name: Descargar proyecto
         uses: actions/checkout@v4
@@ -24,11 +24,10 @@ jobs:
       # 2. INSTALAR JAVA
       # ==========================================
       - name: Instalar Java
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
-          cache: gradle
 
       # ==========================================
       # 3. INSTALAR GRADLE
@@ -39,7 +38,7 @@ jobs:
           gradle-version: '8.10.2'
 
       # ==========================================
-      # 4. BUSCAR PROYECTO ZIP
+      # 4. BUSCAR ZIP
       # ==========================================
       - name: Buscar proyecto ZIP
         shell: bash
@@ -47,34 +46,39 @@ jobs:
           set -e
 
           echo "======================================"
-          echo "BUSCANDO ARCHIVO ZIP DEL PROYECTO"
+          echo "BUSCANDO PROYECTO ZIP"
           echo "======================================"
 
           ZIP_FILE=""
 
           while IFS= read -r file; do
-            echo "ZIP encontrado: $file"
+            echo "Encontrado: $file"
 
             if [[ -z "$ZIP_FILE" ]]; then
               ZIP_FILE="$file"
             fi
-          done < <(find . -type f -iname "*.zip" \
-            ! -path "./.git/*" \
-            ! -path "./.github/*")
+          done < <(
+            find . \
+              -type f \
+              -iname "*.zip" \
+              ! -path "./.git/*" \
+              ! -path "./.github/*"
+          )
 
           if [[ -z "$ZIP_FILE" ]]; then
-            echo "No se encontró ningún archivo ZIP."
+            echo ""
+            echo "ERROR: No se encontró ningún archivo ZIP."
             exit 1
           fi
 
           echo ""
-          echo "Usando ZIP:"
+          echo "ZIP seleccionado:"
           echo "$ZIP_FILE"
 
           echo "ZIP_FILE=$ZIP_FILE" >> "$GITHUB_ENV"
 
       # ==========================================
-      # 5. DESCOMPRIMIR PROYECTO
+      # 5. DESCOMPRIMIR
       # ==========================================
       - name: Descomprimir proyecto
         shell: bash
@@ -91,8 +95,9 @@ jobs:
           unzip -q "$ZIP_FILE" -d proyecto_extraido
 
           echo ""
-          echo "Contenido extraído:"
-          find proyecto_extraido -maxdepth 3 -type f | head -100
+          echo "Proyecto extraído."
+
+          find proyecto_extraido -maxdepth 4 -type f | head -100
 
       # ==========================================
       # 6. DETECTAR PROYECTO ANDROID
@@ -108,31 +113,34 @@ jobs:
 
           PROJECT_DIR=""
 
+          # Buscar settings.gradle / settings.gradle.kts
           while IFS= read -r settings_file; do
 
             DIR="$(dirname "$settings_file")"
 
             echo "Revisando: $DIR"
 
-            if [[ -d "$DIR/app" ]]; then
-              if [[ -f "$DIR/build.gradle" ]] || \
-                 [[ -f "$DIR/build.gradle.kts" ]]; then
+            if [[ -d "$DIR/app" ]] && \
+               { [[ -f "$DIR/build.gradle" ]] || \
+                 [[ -f "$DIR/build.gradle.kts" ]]; }; then
 
-                PROJECT_DIR="$DIR"
-                break
+              PROJECT_DIR="$DIR"
+              break
 
-              fi
             fi
 
           done < <(
             find proyecto_extraido \
               -type f \
-              \( -name "settings.gradle" -o -name "settings.gradle.kts" \) \
+              \( \
+                -name "settings.gradle" \
+                -o \
+                -name "settings.gradle.kts" \
+              \) \
               ! -path "*/.gradle/*"
           )
 
-          # Si no se encontró mediante settings.gradle,
-          # buscar directamente una carpeta que tenga app y build.gradle.
+          # Segunda búsqueda: carpeta app
           if [[ -z "$PROJECT_DIR" ]]; then
 
             while IFS= read -r app_dir; do
@@ -157,11 +165,19 @@ jobs:
           fi
 
           if [[ -z "$PROJECT_DIR" ]]; then
+
             echo ""
-            echo "ERROR: No se encontró un proyecto Android válido."
+            echo "======================================"
+            echo "ERROR"
+            echo "======================================"
+            echo "No se encontró un proyecto Android."
             echo ""
             echo "Archivos encontrados:"
-            find proyecto_extraido -maxdepth 5 -type f | sort
+            find proyecto_extraido \
+              -maxdepth 6 \
+              -type f \
+              | sort
+
             exit 1
           fi
 
@@ -169,10 +185,9 @@ jobs:
 
           echo ""
           echo "======================================"
-          echo "PROYECTO ANDROID ENCONTRADO"
+          echo "PROYECTO ENCONTRADO"
           echo "======================================"
           echo "$PROJECT_DIR"
-          echo ""
 
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
@@ -184,22 +199,18 @@ jobs:
         run: |
           set -e
 
+          cd "$PROJECT_DIR"
+
           echo "======================================"
           echo "CONFIGURANDO ANDROIDX"
           echo "======================================"
 
-          cd "$PROJECT_DIR"
-
           touch gradle.properties
 
-          # Eliminar propiedades antiguas para evitar duplicados
           sed -i '/^[[:space:]]*android\.useAndroidX[[:space:]]*=/d' gradle.properties
           sed -i '/^[[:space:]]*android\.enableJetifier[[:space:]]*=/d' gradle.properties
 
-          # Habilitar AndroidX
           echo "android.useAndroidX=true" >> gradle.properties
-
-          # Jetifier permite compatibilidad con dependencias antiguas
           echo "android.enableJetifier=true" >> gradle.properties
 
           echo ""
@@ -207,7 +218,7 @@ jobs:
           cat gradle.properties
 
       # ==========================================
-      # 8. DAR PERMISOS AL GRADLE WRAPPER
+      # 8. PREPARAR GRADLE
       # ==========================================
       - name: Preparar Gradle
         shell: bash
@@ -217,15 +228,20 @@ jobs:
           cd "$PROJECT_DIR"
 
           if [[ -f "./gradlew" ]]; then
-            chmod +x ./gradlew
+
             echo "Gradle Wrapper encontrado."
+
+            chmod +x ./gradlew
+
           else
-            echo "No existe gradlew."
-            echo "Se utilizará Gradle instalado en el runner."
+
+            echo "No se encontró gradlew."
+            echo "Se utilizará Gradle 8.10.2."
+
           fi
 
       # ==========================================
-      # 9. LIMPIAR PROYECTO
+      # 9. LIMPIAR
       # ==========================================
       - name: Limpiar proyecto
         shell: bash
@@ -239,9 +255,13 @@ jobs:
           echo "======================================"
 
           if [[ -f "./gradlew" ]]; then
+
             ./gradlew clean --no-daemon
+
           else
+
             gradle clean --no-daemon
+
           fi
 
       # ==========================================
@@ -278,7 +298,7 @@ jobs:
 
           echo ""
           echo "======================================"
-          echo "COMPILACIÓN TERMINADA"
+          echo "APK COMPILADO"
           echo "======================================"
 
       # ==========================================
@@ -296,6 +316,7 @@ jobs:
           APK_FILE=""
 
           while IFS= read -r file; do
+
             echo "APK encontrado: $file"
 
             if [[ -z "$APK_FILE" ]]; then
@@ -310,31 +331,31 @@ jobs:
           )
 
           if [[ -z "$APK_FILE" ]]; then
+
             echo ""
-            echo "ERROR: No se encontró ningún APK."
+            echo "ERROR: No se encontró el APK."
             echo ""
-            echo "Contenido de build:"
+
             find "$PROJECT_DIR/app/build" \
-              -maxdepth 6 \
+              -maxdepth 8 \
               -type f \
               2>/dev/null || true
 
             exit 1
+
           fi
 
           echo ""
-          echo "APK encontrado:"
+          echo "APK:"
           echo "$APK_FILE"
 
           mkdir -p apk_final
 
-          cp "$APK_FILE" apk_final/GestorFinanceiroPessoal-debug.apk
-
-          echo ""
-          echo "APK preparado correctamente."
+          cp "$APK_FILE" \
+            apk_final/GestorFinanceiroPessoal-debug.apk
 
       # ==========================================
-      # 12. SUBIR APK COMO ARTIFACT
+      # 12. SUBIR APK
       # ==========================================
       - name: Subir APK
         uses: actions/upload-artifact@v4
