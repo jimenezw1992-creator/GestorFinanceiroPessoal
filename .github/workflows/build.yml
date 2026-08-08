@@ -23,20 +23,50 @@ jobs:
       - name: Instalar Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.10'
+          gradle-version: '8.7'
 
-      - name: Descomprimir proyecto
+      - name: Buscar y descomprimir proyecto
+        shell: bash
         run: |
-          unzip -o GestorFinanceiroPessoal-V2.5-fonte.zip
-          echo "Contenido:"
-          find . -maxdepth 3 -type f | sort
+          echo "Buscando archivo ZIP..."
+          ZIP_FILE=$(find . -maxdepth 1 -type f -iname "*.zip" | head -n 1)
+
+          if [ -z "$ZIP_FILE" ]; then
+            echo "ERROR: No se encontró ningún archivo ZIP."
+            exit 1
+          fi
+
+          echo "ZIP encontrado: $ZIP_FILE"
+
+          mkdir -p proyecto
+          unzip -q "$ZIP_FILE" -d proyecto
+
+          echo "Contenido del proyecto:"
+          find proyecto -maxdepth 3 -type f | sort
+
+      - name: Encontrar proyecto Gradle
+        shell: bash
+        run: |
+          SETTINGS=$(find proyecto -name "settings.gradle.kts" -o -name "settings.gradle" | head -n 1)
+
+          if [ -z "$SETTINGS" ]; then
+            echo "ERROR: No se encontró settings.gradle.kts ni settings.gradle"
+            exit 1
+          fi
+
+          PROJECT_DIR=$(dirname "$SETTINGS")
+
+          echo "Proyecto encontrado en:"
+          echo "$PROJECT_DIR"
+
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
       - name: Compilar APK
-        working-directory: GestorFinanceiroPessoal
-        run: gradle assembleDebug --no-daemon
+        run: |
+          gradle -p "$PROJECT_DIR" assembleDebug --no-daemon
 
       - name: Guardar APK
         uses: actions/upload-artifact@v4
         with:
           name: GestorFinanceiroPessoal-APK
-          path: GestorFinanceiroPessoal/app/build/outputs/apk/debug/app-debug.apk
+          path: '**/build/outputs/apk/debug/*.apk'
