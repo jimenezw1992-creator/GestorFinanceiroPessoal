@@ -1,35 +1,41 @@
 name: Compilar APK
 
 on:
-  workflow_dispatch:
   push:
     branches:
       - main
+  workflow_dispatch:
 
 jobs:
   build:
+    name: build
     runs-on: ubuntu-latest
 
     steps:
+
+      # 1. Descargar el repositorio
       - name: Descargar proyecto
         uses: actions/checkout@v4
 
+      # 2. Instalar Java
       - name: Instalar Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
+      # 3. Instalar Gradle
       - name: Instalar Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.7'
+          gradle-version: '8.10.2'
 
-      - name: Buscar y descomprimir proyecto
+      # 4. Buscar el archivo ZIP del proyecto
+      - name: Buscar proyecto ZIP
+        id: buscar_zip
         shell: bash
         run: |
-          echo "Buscando archivo ZIP..."
-          ZIP_FILE=$(find . -maxdepth 1 -type f -iname "*.zip" | head -n 1)
+          ZIP_FILE=$(find . -maxdepth 2 -type f -iname "*.zip" | head -n 1)
 
           if [ -z "$ZIP_FILE" ]; then
             echo "ERROR: No se encontró ningún archivo ZIP."
@@ -37,36 +43,28 @@ jobs:
           fi
 
           echo "ZIP encontrado: $ZIP_FILE"
+          echo "zip_file=$ZIP_FILE" >> "$GITHUB_OUTPUT"
 
-          mkdir -p proyecto
-          unzip -q "$ZIP_FILE" -d proyecto
-
-          echo "Contenido del proyecto:"
-          find proyecto -maxdepth 3 -type f | sort
-
-      - name: Encontrar proyecto Gradle
+      # 5. Descomprimir el proyecto
+      - name: Descomprimir proyecto
         shell: bash
         run: |
-          SETTINGS=$(find proyecto -name "settings.gradle.kts" -o -name "settings.gradle" | head -n 1)
+          rm -rf proyecto_extraido
+          mkdir -p proyecto_extraido
 
-          if [ -z "$SETTINGS" ]; then
-            echo "ERROR: No se encontró settings.gradle.kts ni settings.gradle"
-            exit 1
-          fi
+          unzip -o "${{ steps.buscar_zip.outputs.zip_file }}" -d proyecto_extraido
 
-          PROJECT_DIR=$(dirname "$SETTINGS")
+          echo "Contenido descomprimido:"
+          find proyecto_extraido -maxdepth 3 -type f | head -100
 
-          echo "Proyecto encontrado en:"
-          echo "$PROJECT_DIR"
+      # 6. Encontrar automáticamente la carpeta Android
+      - name: Detectar proyecto Android
+        id: detectar_proyecto
+        shell: bash
+        run: |
+          PROJECT_DIR=""
 
-          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
-
-      - name: Compilar APK
-  run: |
-    gradle -p "$PROJECT_DIR" assembleDebug --no-daemon --stacktrace --info
-
-      - name: Guardar APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: GestorFinanceiroPessoal-APK
-          path: '**/build/outputs/apk/debug/*.apk'
+          SETTINGS_FILE=$(find proyecto_extraido \
+            -type f \( \
+              -name "settings.gradle" \
+              -o -name "settings.gradle.kts"
