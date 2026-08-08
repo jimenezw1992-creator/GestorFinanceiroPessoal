@@ -13,29 +13,25 @@ jobs:
 
     steps:
 
-      # 1. Descargar el repositorio
       - name: Descargar proyecto
         uses: actions/checkout@v4
 
-      # 2. Instalar Java
       - name: Instalar Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
-      # 3. Instalar Gradle
       - name: Instalar Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.10.2'
 
-      # 4. Buscar el archivo ZIP del proyecto
       - name: Buscar proyecto ZIP
         id: buscar_zip
         shell: bash
         run: |
-          ZIP_FILE=$(find . -maxdepth 2 -type f -iname "*.zip" | head -n 1)
+          ZIP_FILE=$(find . -maxdepth 2 -type f -name "*.zip" | head -n 1)
 
           if [ -z "$ZIP_FILE" ]; then
             echo "ERROR: No se encontró ningún archivo ZIP."
@@ -45,7 +41,6 @@ jobs:
           echo "ZIP encontrado: $ZIP_FILE"
           echo "zip_file=$ZIP_FILE" >> "$GITHUB_OUTPUT"
 
-      # 5. Descomprimir el proyecto
       - name: Descomprimir proyecto
         shell: bash
         run: |
@@ -54,17 +49,108 @@ jobs:
 
           unzip -o "${{ steps.buscar_zip.outputs.zip_file }}" -d proyecto_extraido
 
-          echo "Contenido descomprimido:"
+          echo "Proyecto descomprimido."
           find proyecto_extraido -maxdepth 3 -type f | head -100
 
-      # 6. Encontrar automáticamente la carpeta Android
       - name: Detectar proyecto Android
         id: detectar_proyecto
         shell: bash
         run: |
           PROJECT_DIR=""
 
-          SETTINGS_FILE=$(find proyecto_extraido \
-            -type f \( \
-              -name "settings.gradle" \
-              -o -name "settings.gradle.kts"
+          SETTINGS_FILE=$(find proyecto_extraido -type f -name "settings.gradle" | head -n 1)
+
+          if [ -z "$SETTINGS_FILE" ]; then
+            SETTINGS_FILE=$(find proyecto_extraido -type f -name "settings.gradle.kts" | head -n 1)
+          fi
+
+          if [ -n "$SETTINGS_FILE" ]; then
+            PROJECT_DIR=$(dirname "$SETTINGS_FILE")
+          fi
+
+          if [ -z "$PROJECT_DIR" ]; then
+            BUILD_FILE=$(find proyecto_extraido -type f -name "build.gradle" | head -n 1)
+            
+            if [ -z "$BUILD_FILE" ]; then
+              BUILD_FILE=$(find proyecto_extraido -type f -name "build.gradle.kts" | head -n 1)
+            fi
+
+            if [ -n "$BUILD_FILE" ]; then
+              PROJECT_DIR=$(dirname "$BUILD_FILE")
+            fi
+          fi
+
+          if [ -z "$PROJECT_DIR" ]; then
+            echo "ERROR: No se encontró un proyecto Gradle."
+            echo "Archivos encontrados:"
+            find proyecto_extraido -type f | head -200
+            exit 1
+          fi
+
+          PROJECT_DIR=$(realpath "$PROJECT_DIR")
+
+          echo "======================================"
+          echo "PROYECTO ENCONTRADO:"
+          echo "$PROJECT_DIR"
+          echo "======================================"
+
+          echo "project_dir=$PROJECT_DIR" >> "$GITHUB_OUTPUT"
+
+      - name: Preparar Gradle
+        shell: bash
+        run: |
+          PROJECT_DIR="${{ steps.detectar_proyecto.outputs.project_dir }}"
+
+          cd "$PROJECT_DIR"
+
+          if [ -f "gradlew" ]; then
+            chmod +x gradlew
+            echo "Gradle Wrapper encontrado."
+          else
+            echo "No se encontró Gradle Wrapper."
+            echo "Se utilizará Gradle instalado."
+          fi
+
+      - name: Compilar APK
+        shell: bash
+        run: |
+          PROJECT_DIR="${{ steps.detectar_proyecto.outputs.project_dir }}"
+
+          cd "$PROJECT_DIR"
+
+          echo "======================================"
+          echo "COMPILANDO APK"
+          echo "======================================"
+
+          if [ -f "gradlew" ]; then
+            ./gradlew assembleDebug --no-daemon --stacktrace
+          else
+            gradle assembleDebug --no-daemon --stacktrace
+          fi
+
+      - name: Buscar APK
+        id: buscar_apk
+        shell: bash
+        run: |
+          PROJECT_DIR="${{ steps.detectar_proyecto.outputs.project_dir }}"
+
+          APK_FILE=$(find "$PROJECT_DIR" -type f -name "*.apk" | head -n 1)
+
+          if [ -z "$APK_FILE" ]; then
+            echo "ERROR: No se encontró ningún APK."
+            exit 1
+          fi
+
+          echo "======================================"
+          echo "APK ENCONTRADO:"
+          echo "$APK_FILE"
+          echo "======================================"
+
+          echo "apk_file=$APK_FILE" >> "$GITHUB_OUTPUT"
+
+      - name: Guardar APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: GestorFinanceiroPessoal-APK
+          path: ${{ steps.buscar_apk.outputs.apk_file }}
+          if-no-files-found: error
